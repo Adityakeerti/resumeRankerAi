@@ -1,0 +1,38 @@
+# Pre-computed artifacts (too large for git; regenerate with precompute.py)
+data/embeddings.npy
+data/bm25_index.pkl
+data/features.npy
+data/honeypot_flags.npy
+data/disq_flags.npy
+data/candidate_texts.npy
+data/candidate_ids.npy
+
+# Dataset (too large)
+candidates.jsonl
+
+# Output (committed separately)
+submission.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Models cache
+.cache/
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
