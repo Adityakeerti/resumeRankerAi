@@ -112,6 +112,43 @@ def load_candidates(jsonl_path: str, limit: int | None = None) -> list[dict]:
     return candidates
 
 
+def compute_cdfs(candidates: list[dict]) -> dict:
+    import numpy as np
+
+    response_rates = []
+    response_times = []
+    interview_rates = []
+    offer_rates = []
+    github_scores = []
+    completeness_scores = []
+
+    for c in candidates:
+        sig = c.get('redrob_signals', {})
+        response_rates.append(sig.get('recruiter_response_rate', 0.0))
+        response_times.append(sig.get('avg_response_time_hours', 0.0))
+        interview_rates.append(sig.get('interview_completion_rate', 0.0))
+
+        o_rate = sig.get('offer_acceptance_rate', -1)
+        if o_rate != -1:
+            offer_rates.append(o_rate)
+
+        gh_score = sig.get('github_activity_score', -1)
+        if gh_score != -1:
+            github_scores.append(gh_score)
+
+        completeness_scores.append(sig.get('profile_completeness_score', 0.0))
+
+    cdfs = {
+        'recruiter_response_rate': np.sort(response_rates) if response_rates else np.array([0.0]),
+        'avg_response_time_hours': np.sort(response_times) if response_times else np.array([0.0]),
+        'interview_completion_rate': np.sort(interview_rates) if interview_rates else np.array([0.0]),
+        'offer_acceptance_rate': np.sort(offer_rates) if offer_rates else np.array([0.0]),
+        'github_activity_score': np.sort(github_scores) if github_scores else np.array([0.0]),
+        'profile_completeness_score': np.sort(completeness_scores) if completeness_scores else np.array([0.0])
+    }
+    return cdfs
+
+
 def main():
     args = parse_args()
     out_dir = Path(args.out)
@@ -132,11 +169,20 @@ def main():
     np.save(str(ids_path), np.array(candidate_ids, dtype=object))
     print(f"[IDs] Saved {N} candidate IDs → {ids_path}")
 
+    # ── 2.5 Compute and save CDFs ─────────────────────────────────────────
+    import pickle
+    print(f"[CDF] Computing cumulative distribution functions ...")
+    cdfs = compute_cdfs(candidates)
+    cdf_path = out_dir / 'cdfs.pkl'
+    with open(cdf_path, 'wb') as f:
+        pickle.dump(cdfs, f)
+    print(f"[CDF] Saved CDF distributions to {cdf_path}")
+
     # ── 3. Build candidate texts (for embeddings + BM25) ─────────────────
     print(f"[Text] Building candidate text blobs ...")
     t0 = time.time()
     candidate_texts = [
-        build_candidate_text(c, max_chars=CANDIDATE_TEXT_MAX_CHARS)
+        build_candidate_text(c, max_chars=CANDIDATE_TEXT_MAX_CHARS, cdfs=cdfs)
         for c in tqdm(candidates, desc="Text builder", unit=" cands")
     ]
     print(f"[Text] Done in {time.time()-t0:.1f}s")

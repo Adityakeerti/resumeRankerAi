@@ -46,9 +46,8 @@ def build_bi_encoder_embeddings(
     Compute and save bi-encoder embeddings for all candidates using multi-processing.
     """
     from sentence_transformers import SentenceTransformer
-
     print(f"[BiEncoder] Loading model: {BI_ENCODER_MODEL}")
-    model = SentenceTransformer(BI_ENCODER_MODEL)
+    model = SentenceTransformer(BI_ENCODER_MODEL, trust_remote_code=True)
 
     print(f"[BiEncoder] Starting multi-process pool ...")
     pool = model.start_multi_process_pool()
@@ -99,7 +98,7 @@ def embed_query(query_text: str) -> np.ndarray:
         np.ndarray of float32, shape (384,), L2-normalised
     """
     from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(BI_ENCODER_MODEL)
+    model = SentenceTransformer(BI_ENCODER_MODEL, trust_remote_code=True)
     vec   = model.encode(
         [query_text],
         normalize_embeddings=True,
@@ -173,3 +172,72 @@ def cross_encoder_scores(
     # Sigmoid to get probabilities in [0, 1]
     scores = 1.0 / (1.0 + np.exp(-raw_logits))
     return scores.astype(np.float32)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NLI Logical Constraint Scorer (Top-2000 only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def nli_constraint_penalties(
+    candidates_list: list[dict],
+    nli_model_name: str,
+    work_mode_premise: str,
+    relocation_premise: str,
+    preferred_locations: set[str],
+    batch_size: int = 32
+) -> np.ndarray:
+    """
+    Run zero-shot NLI contradiction checks on the top candidates to identify logical mismatch.
+    Only run on Top-2,000 for sub-minute online latency.
+    """
+    from sentence_transformers import CrossEncoder
+
+    print(f"[NLI] Loading NLI model: {nli_model_name} ...")
+    model = CrossEncoder(nli_model_name, max_length=256)
+
+    pairs = []
+    indices_to_check = []
+
+    for i, c in enumerate(candidates_list):
+        sig = c.get('redrob_signals', {})
+        loc = (c.get('profile', {}).get('location', '') or '').lower()
+        willing = sig.get('willing_to_relocate', False)
+        work_mode = sig.get('preferred_work_mode', 'flexible')
+
+        # Check 1: Work Mode Conflict
+        # Premise: "The candidate is compatible with working onsite or hybrid."
+        # Hypothesis: "The candidate strictly prefers remote work." (if remote)
+        # If candidate prefers remote, we check compatibility.
+        if work_mode == 'remote':
+            hyp = "The candidate strictly prefers remote work."
+            pairs.append((work_mode_premise, hyp))
+            indices_to_check.append((i, 'mode'))
+
+        # Check 2: Location Conflict
+        # Relocation check: only runs if they don't live in the preferred cities (pune, noida)
+        is_preferred_loc = any(p_loc in loc for p_loc in preferred_locations)
+        if not is_preferred_loc and not willing:
+            hyp = "The candidate is not willing to relocate."
+            pairs.append((relocation_premise, hyp))
+            indices_to_check.append((i, 'reloc'))
+
+    penalties = np.ones(len(candidates_list), dtype=np.float32)
+    if not pairs:
+        return penalties
+
+    print(f"[NLI] Scoring {len(pairs)} logical constraints ...")
+    logits = model.predict(pairs, batch_size=batch_size)
+
+    # Softmax over logits (label 0: contradiction, 1: entailment, 2: neutral)
+    for idx, logit in enumerate(logits):
+        exp = np.exp(logit - np.max(logit))
+        probs = exp / exp.sum()
+        p_contradiction = probs[0]
+
+        cand_idx, check_type = indices_to_check[idx]
+        if p_contradiction > 0.80:
+            # Apply NLI contradiction penalty (0.1 multiplier as per solution design)
+            penalties[cand_idx] *= 0.10
+
+    return penalties
+

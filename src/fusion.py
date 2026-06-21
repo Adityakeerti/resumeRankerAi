@@ -118,25 +118,37 @@ def stage2_fusion(
 
     penalised = base_scores * hp_top * dq_top
 
-    # Tie-break by ascending candidate_id (lexicographic)
-    # Create a secondary sort key: convert candidate_id to integer suffix
-    ids_top = [candidate_ids[i] for i in top_n_indices]
-    id_keys = _id_sort_keys(ids_top)
-
-    # Sort: primary = descending score, secondary = ascending candidate_id
-    # Negate score for ascending argsort
+    # 1. Sort primarily by raw score (descending), secondarily by candidate_id (ascending)
+    top_ids = [candidate_ids[i] for i in top_n_indices]
+    id_keys = _id_sort_keys(top_ids)
     sort_order = np.lexsort((id_keys, -penalised))
     top_sorted  = sort_order[:top_n_final]
 
-    # Map back to original full-array indices
-    final_indices_in_top = top_sorted
-    final_indices        = top_n_indices[final_indices_in_top]
-    raw_final_scores     = penalised[final_indices_in_top]
+    # 2. Get top-100 indices and raw scores
+    final_indices = top_n_indices[top_sorted]
+    raw_final_scores = penalised[top_sorted]
 
-    # Normalise to [0.20, 0.99] (non-uniform, reflects actual fit gaps)
+    # 3. Normalise top-100 raw scores to [0.20, 0.99]
     normalised_scores = _normalise_scores(raw_final_scores, low=0.20, high=0.99)
+    # Round to 4 decimal places (exactly what's written to CSV)
+    rounded_scores = np.round(normalised_scores, 4)
 
-    return final_indices, normalised_scores
+    # 4. Re-sort the top-100 candidates to resolve any ties created by rounding
+    final_ids = [candidate_ids[i] for i in final_indices]
+    final_id_keys = _id_sort_keys(final_ids)
+
+    # Sort primarily by rounded_scores (descending), secondarily by final_id_keys (ascending)
+    final_sort_order = np.lexsort((final_id_keys, -rounded_scores))
+
+    final_indices = final_indices[final_sort_order]
+    final_scores = rounded_scores[final_sort_order]
+
+    # Double check monotonicity to prevent tiny floating point rounding issues
+    for i in range(1, len(final_scores)):
+        if final_scores[i] > final_scores[i-1]:
+            final_scores[i] = final_scores[i-1]
+
+    return final_indices, final_scores
 
 
 def _id_sort_keys(ids: list[str]) -> np.ndarray:

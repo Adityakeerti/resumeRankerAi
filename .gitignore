@@ -1,6 +1,7 @@
 # Pre-computed artifacts (too large for git; regenerate with precompute.py)
 data/embeddings.npy
 data/bm25_index.pkl
+data/cdfs.pkl
 data/features.npy
 data/honeypot_flags.npy
 data/disq_flags.npy

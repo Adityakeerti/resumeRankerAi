@@ -161,12 +161,17 @@ def main():
         TOP_N_STAGE1, TOP_N_FINAL,
         CANDIDATE_TEXT_MAX_CHARS,
         JD_TEXT_SUMMARY,
+        NLI_MODEL,
+        NLI_PREMISE_MODE,
+        NLI_PREMISE_RELOC,
+        PREFERRED_LOCATIONS,
     )
     from src.text_builder import build_candidate_text, build_jd_text, build_jd_tokens
-    from src.semantic_scorer import load_embeddings, embed_query, cosine_scores, cross_encoder_scores
+    from src.semantic_scorer import load_embeddings, embed_query, cosine_scores, cross_encoder_scores, nli_constraint_penalties
     from src.bm25_scorer import load_bm25_index, query_bm25
     from src.fusion import stage1_fusion, stage2_fusion
     from src.reasoning import build_reasoning
+    import pickle
 
     top_n_stage1 = args.top_n_stage1 or TOP_N_STAGE1
     data_dir     = Path(args.precomputed)
@@ -185,6 +190,7 @@ def main():
     hp_path    = data_dir / 'honeypot_flags.npy'
     dq_path    = data_dir / 'disq_flags.npy'
     texts_path = data_dir / 'candidate_texts.npy'
+    cdf_path   = data_dir / 'cdfs.pkl'
 
     for p in [emb_path, ids_path, feat_path, bm25_path, hp_path, dq_path]:
         if not p.exists():
@@ -198,6 +204,14 @@ def main():
     honeypot_pen      = np.load(str(hp_path))
     disq_pen          = np.load(str(dq_path))
     bm25              = load_bm25_index(str(bm25_path))
+
+    # Load CDFs if available
+    if cdf_path.exists():
+        with open(cdf_path, 'rb') as f:
+            cdfs = pickle.load(f)
+        print(f"[1/7] Loaded CDF distribution data")
+    else:
+        cdfs = None
 
     # Candidate texts (for cross-encoder)
     if texts_path.exists() and not args.no_cross_encoder:
@@ -219,20 +233,74 @@ def main():
 
     print(f"[2/7] JD embedded in {time.time()-t0:.1f}s  ({len(jd_tokens)} tokens)")
 
-    # ── Step 3: Compute semantic & lexical scores ─────────────────────────
-    print(f"\n[3/7] Scoring {N:,} candidates ...")
+    # ── Step 2.5: L1 Shortlist (Top 2,000) ─────────────────────────────────
+    print(f"\n[2.5/7] L1 Shortlist (Top 2,000) ...")
     t0 = time.time()
 
-    # Bi-encoder cosine similarities (~0.5 sec)
-    semantic_sc = cosine_scores(jd_vec, candidate_embs)
+    # Compute cosine similarities on the full 384-dimensional embeddings
+    # Since candidate_embs and jd_vec are already L2-normalized, this is just a dot product.
+    scores_full = candidate_embs @ jd_vec
 
-    # BM25 lexical scores (~3 sec)
-    lexical_sc  = query_bm25(bm25, jd_tokens)
+    # Sort and select top-2000 indices
+    l1_indices = np.argsort(-scores_full)[:2000]
+    l1_indices = np.array(l1_indices)
+
+    print(f"[2.5/7] L1 shortlist generated in {time.time()-t0:.1f}s (Top 2,000 selected)")
+
+    # ── Step 2.6: NLI Logical Gate (on Top-2000) ──────────────────────────
+    print(f"\n[2.6/7] NLI Logical Gate (on Top-2000) ...")
+    t0 = time.time()
+
+    l1_ids = [candidate_ids[idx] for idx in l1_indices]
+    print(f"[NLI] Loading profiles for Top-2000 candidates from candidates.jsonl ...")
+    l1_cands_map = stream_candidates_by_ids(args.candidates, set(l1_ids))
+    l1_cands_list = [l1_cands_map[cid] for cid in l1_ids if cid in l1_cands_map]
+
+    # Ensure mapping matches the order of l1_indices
+    # Fallback to empty candidates if stream missed some profiles
+    ordered_l1_cands = []
+    for cid in l1_ids:
+        if cid in l1_cands_map:
+            ordered_l1_cands.append(l1_cands_map[cid])
+        else:
+            ordered_l1_cands.append({'candidate_id': cid, 'profile': {}, 'redrob_signals': {}, 'career_history': [], 'skills': []})
+
+    nli_penalties = nli_constraint_penalties(
+        candidates_list=ordered_l1_cands,
+        nli_model_name=NLI_MODEL,
+        work_mode_premise=NLI_PREMISE_MODE,
+        relocation_premise=NLI_PREMISE_RELOC,
+        preferred_locations=PREFERRED_LOCATIONS,
+        batch_size=32
+    )
+
+    print(f"[2.6/7] NLI Logical Gate done in {time.time()-t0:.1f}s")
+
+    # ── Step 3: Compute semantic & lexical scores on top-2000 ─────────────
+    print(f"\n[3/7] Scoring Top-2,000 shortlisted candidates ...")
+    t0 = time.time()
+
+    # Full 768-d semantic cosine similarities for the top-2000
+    semantic_sc_full = cosine_scores(jd_vec, candidate_embs[l1_indices])
+
+    # BM25 lexical scores for the top-2000
+    lexical_sc_full  = query_bm25(bm25, jd_tokens)[l1_indices]
+
+    # Expand back to global arrays (rest of candidates set to 0.0)
+    semantic_sc = np.zeros(N, dtype=np.float32)
+    semantic_sc[l1_indices] = semantic_sc_full
+
+    lexical_sc = np.zeros(N, dtype=np.float32)
+    lexical_sc[l1_indices] = lexical_sc_full
+
+    # Update global disqualifier penalties to include NLI logic check
+    disq_pen_nli = disq_pen.copy()
+    disq_pen_nli[l1_indices] *= nli_penalties
 
     print(f"[3/7] Semantic + lexical scoring done in {time.time()-t0:.1f}s")
 
-    # ── Step 4: Stage 1 fusion → top-500 ─────────────────────────────────
-    print(f"\n[4/7] Stage 1 fusion → top-{top_n_stage1} candidates ...")
+    # -- Step 4: Stage 1 fusion -> top-500 ---------------------------------
+    print(f"\n[4/7] Stage 1 fusion -> top-{top_n_stage1} candidates ...")
     t0 = time.time()
 
     _, top_n_indices = stage1_fusion(
@@ -240,7 +308,7 @@ def main():
         lexical_scores=lexical_sc,
         structured_scores=structured_scores,
         honeypot_penalties=honeypot_pen,
-        disq_penalties=disq_pen,
+        disq_penalties=disq_pen_nli,
         top_n=top_n_stage1,
     )
 
@@ -258,7 +326,7 @@ def main():
         if candidate_texts_all is not None:
             top_texts = [candidate_texts_all[i] for i in top_n_indices]
         else:
-            # Fallback: rebuild texts on the fly for top-N (slower but works)
+            # Fallback: rebuild texts on the fly for top-N
             print("[5/7] Candidate texts not cached; rebuilding for top candidates ...")
             top_texts = _rebuild_texts_for_indices(
                 jsonl_path=args.candidates,
@@ -273,8 +341,8 @@ def main():
         )
         print(f"[5/7] Cross-encoder done in {time.time()-t0:.1f}s")
 
-    # ── Step 6: Stage 2 fusion → final top-100 ───────────────────────────
-    print(f"\n[6/7] Stage 2 fusion → final top-{TOP_N_FINAL} ...")
+    # ── Step 6: Stage 2 fusion -> final top-100 ───────────────────────────
+    print(f"\n[6/7] Stage 2 fusion -> final top-{TOP_N_FINAL} ...")
     t0 = time.time()
 
     final_indices, final_scores = stage2_fusion(
@@ -284,7 +352,7 @@ def main():
         structured_scores=structured_scores,
         cross_encoder_scores=ce_scores_top,
         honeypot_penalties=honeypot_pen,
-        disq_penalties=disq_pen,
+        disq_penalties=disq_pen_nli,
         candidate_ids=candidate_ids,
         top_n_final=TOP_N_FINAL,
     )
@@ -293,18 +361,28 @@ def main():
     print(f"[6/7] Stage 2 done in {time.time()-t0:.1f}s")
 
     # ── Step 7: Load final candidates + generate reasoning ────────────────
-    print(f"\n[7/7] Loading top-{TOP_N_FINAL} candidate profiles for reasoning ...")
+    print(f"\n[7/7] Slicing top-{TOP_N_FINAL} candidate profiles for reasoning ...")
     t0 = time.time()
 
-    wanted_set    = set(final_cand_ids)
-    top_cand_map  = stream_candidates_by_ids(args.candidates, wanted_set)
+    # Reuse the already loaded profiles from Step 2.6 to avoid disk I/O
+    top_cand_map = {}
+    missing_ids = set()
+    for cid in final_cand_ids:
+        if cid in l1_cands_map:
+            top_cand_map[cid] = l1_cands_map[cid]
+        else:
+            missing_ids.add(cid)
+
+    if missing_ids:
+        print(f"[WARN] Retrieving {len(missing_ids)} profiles missing from L1 cache ...")
+        fallback_map = stream_candidates_by_ids(args.candidates, missing_ids)
+        top_cand_map.update(fallback_map)
 
     # Build rows
     rows = []
     for rank_idx, (cid, score) in enumerate(zip(final_cand_ids, final_scores), start=1):
         cand = top_cand_map.get(cid)
         if cand is None:
-            # Fallback if candidate not found (shouldn't happen)
             reasoning = f"Rank {rank_idx} candidate (profile unavailable)"
         else:
             reasoning = build_reasoning(cand, rank=rank_idx, today=today)
@@ -325,8 +403,8 @@ def main():
                 f"str={structured_scores[orig_idx]:.3f} "
                 f"ce={ce_scores_top[list(top_n_indices).index(orig_idx)] if not args.no_cross_encoder else 0:.3f} "
                 f"hp={honeypot_pen[orig_idx]:.2f} "
-                f"dq={disq_pen[orig_idx]:.2f} "
-                f"→ {float(score):.4f}"
+                f"dq={disq_pen_nli[orig_idx]:.2f} "
+                f"-> {float(score):.4f}"
             )
 
     print(f"[7/7] Reasoning generated in {time.time()-t0:.1f}s")

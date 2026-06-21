@@ -225,6 +225,11 @@ RESPONSE_TIME_HALF_LIFE_HRS  = 48
 
 BI_ENCODER_MODEL      = "sentence-transformers/all-MiniLM-L6-v2"
 CROSS_ENCODER_MODEL   = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+NLI_MODEL             = "cross-encoder/nli-deberta-v3-small"
+
+# NLI Premise statements for checking logical constraints
+NLI_PREMISE_MODE      = "The candidate is compatible with working onsite or hybrid."
+NLI_PREMISE_RELOC     = "The candidate is willing to relocate to another city."
 
 # Non-AI roles — used for title/description mismatch detection
 NON_AI_ROLE_KEYWORDS = {
