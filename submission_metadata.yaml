@@ -8,7 +8,7 @@ primary_contact: "adityacodes404@gmail.com"
 
 # ─── Repository & Demo ────────────────────────────────────────────────────
 github_repo: "https://github.com/Adityakeerti/resumeRankerAi"
-sandbox_link: "https://huggingface.co/spaces/Adityakeerti/redrob-ranker"  # TODO: update
+sandbox_link: "https://huggingface.co/spaces/adityacodes404/redrob-ranker"
 
 # ─── Reproduce Command ────────────────────────────────────────────────────
 # This must produce submission.csv in ≤ 5 minutes on CPU, 16 GB RAM, no network
