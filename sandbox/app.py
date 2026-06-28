@@ -40,31 +40,31 @@ from src.reasoning import build_reasoning
 
 # ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Redrob AI — Candidate Ranker",
-    page_icon="🎯",
+    page_title="Redrob AI - Candidate Ranker",
+    page_icon="💼",
     layout="wide",
 )
 
-st.title("🎯 Redrob AI — Intelligent Candidate Ranking")
+st.title("Redrob AI - Candidate Ranking System")
 st.caption(
-    "Hybrid multi-stage ranker: Bi-encoder semantics + BM25 lexical + "
-    "JD-specific structured scoring + Cross-encoder reranking"
+    "Multi-Stage Retrieval and Reranking Pipeline: Bi-Encoder Semantics + BM25 Lexical + "
+    "Structured JD-Fit Scoring + Cross-Encoder Reranking"
 )
 
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("Configuration")
     use_cross_encoder = st.checkbox("Use Cross-Encoder (slower, more accurate)", value=True)
     top_n_display     = st.slider("Show top N results", 10, 100, 50)
     st.divider()
-    st.subheader("📋 Scoring Weights")
+    st.subheader("Scoring Weights")
     st.write("• Structured (JD-fit):  45%")
     st.write("• Semantic (bi-encoder): 25%")
     st.write("• Cross-Encoder:         20%")
     st.write("• Lexical (BM25):        10%")
     st.divider()
     st.info(
-        "ℹ️ For the full 100K ranking, run `precompute.py` + `rank.py` locally. "
+        "For the full 100K ranking, run `precompute.py` + `rank.py` locally. "
         "This demo accepts up to 100 candidates for interactive exploration."
     )
 
@@ -72,7 +72,7 @@ with st.sidebar:
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("📄 Job Description")
+    st.subheader("Job Description")
     jd_input = st.text_area(
         "Paste job description text:",
         value=JD_TEXT_SUMMARY.strip(),
@@ -81,7 +81,7 @@ with col1:
     )
 
 with col2:
-    st.subheader("👥 Candidate Profiles")
+    st.subheader("Candidate Profiles")
     uploaded_file = st.file_uploader(
         "Upload candidates.jsonl (≤ 100 candidates)",
         type=['jsonl', 'json'],
@@ -236,7 +236,7 @@ if uploaded_file is not None:
 
 # ── Ranking ──────────────────────────────────────────────────────────────────
 
-if st.button("🚀 Rank Candidates", type="primary", disabled=not st.session_state.candidates):
+if st.button("Rank Candidates", type="primary", disabled=not st.session_state.candidates):
     candidates = st.session_state.candidates
     N          = len(candidates)
     today      = date.today()
@@ -314,7 +314,7 @@ if st.button("🚀 Rank Candidates", type="primary", disabled=not st.session_sta
         progress_bar.progress(100, "Done!")
 
     # ── Results display ──────────────────────────────────────────────────
-    st.success(f"Ranked {N} candidates → showing top {final_n}")
+    st.success(f"Ranked {N} candidates -> showing top {final_n}")
 
     rows = []
     for rank_i, (idx, score) in enumerate(zip(final_idx, final_sc), start=1):
@@ -359,7 +359,7 @@ if st.button("🚀 Rank Candidates", type="primary", disabled=not st.session_sta
         })
 
     st.download_button(
-        label="⬇️ Download submission.csv",
+        label="Download submission.csv",
         data=output.getvalue(),
         file_name="submission.csv",
         mime="text/csv",
@@ -375,4 +375,4 @@ if st.button("🚀 Rank Candidates", type="primary", disabled=not st.session_sta
     st.line_chart(score_df.set_index("Rank"))
 
 elif not st.session_state.candidates:
-    st.info("👆 Upload a candidates.jsonl file or click 'Generate sample candidates' to get started.")
+    st.info("Upload a candidates.jsonl file or click 'Generate sample candidates' to get started.")
