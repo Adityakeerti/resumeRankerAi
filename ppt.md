@@ -90,68 +90,37 @@
 
 ### Slide 6: System Architecture Diagram
 ```mermaid
-graph TD
-    %% Offline Precomputation Style
-    subgraph Offline ["OFFLINE PRECOMPUTATION (precompute.py)"]
-        A[candidates.jsonl] --> B[Multiprocessing Parser]
-        B --> C[Structured Extractor]
-        B --> D[Text Corpus Builder]
-        
-        C --> C1[CDF Percentile Normalization]
-        C1 --> C2[features.npy]
-        
-        B --> E[Honeypot Detector]
-        E --> E1[7-Point Checks]
-        E1 --> E2[honeypot_flags.npy]
-        
-        B --> F[Disqualifier Scorer]
-        F --> F1[9 Multiplicative Categories]
-        F1 --> F2[disq_flags.npy]
-        
-        D --> G[all-MiniLM-L6-v2 Bi-Encoder]
-        G --> H[embeddings.npy 100K x 384]
-        
-        D --> I[BM25 Indexer]
-        I --> J[bm25_index.pkl]
+graph LR
+    %% Offline Precomputation
+    subgraph Offline ["OFFLINE PRECOMPUTATION"]
+        A[(candidates.jsonl)] --> B[Parser & Extractor]
+        B --> C[CDF Normalization] --> C2[features.npy]
+        B --> E[Honeypot Detector] --> E2[honeypot_flags.npy]
+        B --> F[Disqualifier Scorer] --> F2[disq_flags.npy]
+        B --> D[Text Builder]
+        D --> G[Bi-Encoder] --> H[embeddings.npy]
+        D --> I[BM25 Indexer] --> J[bm25_index.pkl]
     end
 
-    %% Online Ranking Style
-    subgraph Online ["ONLINE RUNTIME PIPELINE (rank.py - Under 2 Min)"]
-        JD[Job Description .docx] --> K[JD Text Extractor & Cleaner]
-        K --> L[all-MiniLM-L6-v2 JD Embedding]
-        
-        %% Retrieval
-        L --> M[L1 Cosine Similarity over 100K]
-        K --> N[BM25 Query Scorer]
-        
-        M & N --> O[Stage 1 Fusion Layer]
-        C2 & E2 & F2 --> O
-        
-        O --> P[Shortlist Top 2000]
-        
-        %% NLI Gate
-        P --> Q[Zero-Shot NLI Gate - nli-deberta-v3-small]
-        Q --> Q1[Compare Relocation & Remote Mode]
-        Q1 --> Q2[Apply Contradiction Penalties]
-        
-        Q2 --> R[Select Top 500]
-        
-        %% Reranking
-        R --> S[Cross-Encoder - ms-marco-MiniLM-L-6-v2]
-        S --> T[Stage 2 Score Fusion Layer]
-        
-        T --> U[Final Top-100 Filter]
-        U --> V[Rounded Score & Lexicographical Tie-Breaker]
-        V --> W[Fact-Grounded Reasoning Generator]
-        W --> X[submission.csv / XLSX]
+    %% Online Pipeline
+    subgraph Online ["ONLINE PIPELINE (rank.py)"]
+        JD[JD.docx] --> K[Embed & Tokens]
+        K & H & J --> L[L1 Cosine & BM25]
+        L & C2 & E2 & F2 --> M[Stage 1 Fusion]
+        M --> N[Top 2000]
+        N --> O[Zero-Shot NLI Gate]
+        O --> P[Top 500]
+        P --> Q[Cross-Encoder Rerank]
+        Q --> R[Stage 2 Fusion]
+        R --> S[Rounding & Tie-Breaker]
+        S --> T[Reasoner Build] --> U([submission.xlsx])
     end
 
     classDef default fill:#172A45,stroke:#64FFDA,stroke-width:2px,color:#E6F1FF;
     classDef offline fill:#0A192F,stroke:#8892B0,stroke-width:2px,color:#CCD6F6;
     classDef online fill:#0F1E36,stroke:#64FFDA,stroke-width:2px,color:#E6F1FF;
-    
-    class Offline,A,B,C,C1,C2,D,E,E1,E2,F,F1,F2,G,H,I,J offline;
-    class Online,JD,K,L,M,N,O,P,Q,Q1,Q2,R,S,T,U,V,W,X online;
+    class Offline,A,B,C,C2,E,E2,F,F2,D,G,H,I,J offline;
+    class Online,JD,K,L,M,N,O,P,Q,R,S,T,U online;
 ```
 
 ---
