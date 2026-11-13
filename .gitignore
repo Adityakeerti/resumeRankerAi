@@ -37,3 +37,13 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# React UI
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+
+# Artifacts in any data/ subfolder (e.g. data/smoke/ from the quick check)
+data/**/*.npy
+data/**/*.pkl
+smoke_submission.csv

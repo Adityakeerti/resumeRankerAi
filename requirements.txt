@@ -11,6 +11,10 @@ scikit-learn==1.4.2             # utility functions (optional; used via sentence
 tqdm==4.66.4                    # progress bars for pre-computation
 PyYAML==6.0.1                   # metadata YAML loading
 streamlit==1.35.0               # sandbox demo (sandbox/app.py only)
+pyarrow==16.1.0                 # streamlit dataframes; pinned because pyarrow>=17 needs numpy 2.x
 torch==2.3.0                    # required by sentence-transformers (CPU build)
 transformers==4.41.0            # required by sentence-transformers
 tokenizers==0.19.1              # required by transformers
+fastapi==0.115.12               # web demo API (api/server.py)
+uvicorn==0.34.2                 # ASGI server for the web demo
+python-multipart==0.0.20        # file uploads in the web demo
